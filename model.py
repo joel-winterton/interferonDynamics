@@ -35,7 +35,7 @@ class Model:
     """
     lattice: npt.NDArray[Cell]
 
-    def __init__(self, n=100, rho=0.09, alpha=0.01, tau=2160, R=1, timestep=1):
+    def __init__(self, n=100, rho=0.09, alpha=1.5, tau=2160, R=1, timestep=1):
         if n % 2 != 0:
             raise ValueError(
                 "For ease of writing (and maybe computation speed), n must be an even number (just add another row).")
@@ -48,6 +48,9 @@ class Model:
         self.R = R
 
         self.lattice = np.full(shape=(2, int(self.N / 2), self.N), fill_value=Cell())
+        # Cell is being copied by reference, this just replaces each cell with a unique Cell object.
+        for index, cell in np.ndenumerate(self.lattice):
+            self.lattice[index] = Cell()
 
     def get_neighbours_coords(self, coordinates) -> np.ndarray:
         """
@@ -102,7 +105,7 @@ class Model:
             values = np.full(coordinates.shape[0], fill_value=1.)
 
         for i in range(coordinates.shape[0]):
-            self.lattice[coordinates[i, 0], coordinates[i, 1], coordinates[i, 2]].virions += values
+            self.lattice[coordinates[i, 0], coordinates[i, 1], coordinates[i, 2]].virions += values[i]
 
     def random_seed(self, pfu) -> None:
         """
@@ -117,12 +120,19 @@ class Model:
         seed_coords = np.array([a, r, c]).T
         self.add_virions(seed_coords)
 
-    def simulate(self) -> None:
+    def simulate(self, termination_time=500) -> np.ndarray:
         t = 0
+        times, ifn_concentrations = [], []
+        infected_cells = []
         rng = np.random.default_rng()
         ifn_release_count = 0
         total_ifn_count = 0
-        while t <= 200:
+        total_infected_cells = 0
+        while t <= termination_time:
+            infected_cells.append(total_infected_cells)
+            print(f"Time: {t}, infection probability: {self.rho * np.exp(-self.alpha * total_ifn_count / (self.N * self.R))}", end='\r')
+            times.append(t)
+            ifn_concentrations.append(total_ifn_count / self.N)
             # geometry agnostic way of iterating through lattice
             for obj in np.ndenumerate(self.lattice):
 
@@ -130,11 +140,18 @@ class Model:
                 cell: Cell = obj[1]
 
                 if not cell.infected and not cell.antiviral and cell.virions > 0:
-                    probability_of_infection = cell.virions * self.rho * np.exp(
-                        -self.alpha * total_ifn_count / (self.N * self.R))
-                    if rng.uniform(0, 1) < probability_of_infection:
+                    uniforms = rng.uniform(0,1, np.floor(cell.virions).astype(int))
+                    probability_of_infection = self.rho * np.exp(-self.alpha * total_ifn_count / (self.N * self.R))
+                    infect = False
+                    for u in uniforms:
+                        if u <= probability_of_infection:
+                            infect = True
+                            break
+                    if infect:
+                        total_infected_cells += 1
                         # infection event
                         cell.infected = True
+                        cell.infection_time = t
                         cell.lysis_time = t + rng.normal(12, 3)
 
                         cell.ifn_release_time = t + rng.normal(5, 1)
@@ -161,12 +178,12 @@ class Model:
                 if not cell.dead and not cell.infected and t >= cell.antiviral_time:
                     cell.antiviral = True
 
-                if cell.dead and not cell.regrowth:
-                    neighbours = self.get_neighbours(cell_coord)
+                if cell.dead and not cell.regrowing:
+                    neighbours = self.get_neighbours(np.array([cell_coord]))
                     for neighbour in neighbours:
                         if not neighbour.infected and not neighbour.dead:
-                            cell.regrowth = True
-                    if cell.regrowth:
+                            cell.regrowing = True
+                    if cell.regrowing:
                         cell.regrowth_time = t + rng.normal(24, 6)
                 if t >= cell.regrowth_time:
                     cell.dead = False
@@ -175,10 +192,10 @@ class Model:
                     cell.releasing_ifn = False
             # Do cached actions
             t += self.timestep
+        return np.array([times, ifn_concentrations, infected_cells])
 
-
-model = Model()
-model.random_seed(100)
-model.simulate()
-
-print("Complete")
+    def map_lattice(self, property_name:str):
+        props = []
+        for cell in self.lattice.ravel():
+            props.append(getattr(cell, property_name))
+        return props

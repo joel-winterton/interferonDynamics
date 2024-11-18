@@ -1,10 +1,8 @@
-from typing import List
-
-
 class Cell:
+    # TODO: Extract this out into multiple numpy arrays (one for each property) so simulation can be vectorised
     dead = False
     infected = False
-    antiviral = True
+    antiviral = False
     virions = 0.
     releasing_ifn = False
     ifn_release_time = float('inf')
@@ -13,6 +11,7 @@ class Cell:
     lysis_time = float('inf')
     regrowing = False
     regrowth_time = float('inf')
+    infection_time = float('inf')
 
     def __init__(self):
         """
